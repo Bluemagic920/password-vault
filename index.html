@@ -1,0 +1,719 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src https://api.github.com; img-src data:; form-action 'none'; base-uri 'none'">
+<title>Password Vault</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Sans+Condensed:wght@600&display=swap" rel="stylesheet">
+<style>
+/* Layout idea: one narrow working column, like a ledger. Secrets are always set in mono. */
+:root{
+  --bg:#eceff3; --surface:#ffffff; --ink:#17212c; --muted:#5a6675; --line:#d3d9e0;
+  --accent:#2a4d9c; --accent-ink:#ffffff; --good:#1c7347; --danger:#b0352d; --warn-bg:#fff4d6; --warn-ink:#6b4a00;
+  --display:"IBM Plex Sans Condensed","Arial Narrow",sans-serif;
+  --body:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme: dark){
+  :root{
+    color-scheme:dark;
+    --bg:#11161d; --surface:#1a212b; --ink:#e6ebf1; --muted:#98a4b3; --line:#2f3947;
+    --accent:#8fb0f5; --accent-ink:#0f1722; --good:#6fd09c; --danger:#f08a80; --warn-bg:#3a2f10; --warn-ink:#f1d48a;
+  }
+}
+*{box-sizing:border-box}
+[hidden]{display:none !important}
+html,body{margin:0}
+body{background:var(--bg);color:var(--ink);font:16px/1.5 var(--body);padding:24px 16px 64px}
+main{max-width:680px;margin:0 auto;display:flex;flex-direction:column;gap:16px}
+header{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+h1{font:600 28px/1.1 var(--display);letter-spacing:.01em;margin:0;text-wrap:balance}
+h2{font:600 20px/1.2 var(--display);margin:0;text-wrap:balance}
+h3{font:600 15px/1.3 var(--body);margin:0}
+p{margin:0;max-width:65ch}
+.muted{color:var(--muted);font-size:14px}
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:20px;display:flex;flex-direction:column;gap:14px}
+form{display:flex;flex-direction:column;gap:12px}
+label{display:flex;flex-direction:column;gap:4px;font-size:14px;font-weight:500}
+input,textarea{font:inherit;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:9px 10px;width:100%}
+input.secret,.secret{font-family:var(--mono)}
+textarea{min-height:64px;resize:vertical}
+button{font:500 14px var(--body);border-radius:6px;border:1px solid var(--line);background:var(--surface);color:var(--ink);padding:8px 12px;cursor:pointer}
+button:hover{border-color:var(--accent)}
+button.primary{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+button.danger{color:var(--danger)}
+button.link{border:none;background:none;padding:0;color:var(--accent);text-decoration:underline;align-self:flex-start}
+button:disabled{opacity:.55;cursor:default}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.grow{flex:1 1 180px;min-width:0}
+.err{color:var(--danger);font-size:14px;min-height:1em}
+.note{background:var(--warn-bg);color:var(--warn-ink);border-radius:6px;padding:10px 12px;font-size:14px}
+.pill{font-size:12px;font-weight:500;border:1px solid var(--line);border-radius:999px;padding:3px 10px;color:var(--muted);overflow-wrap:anywhere}
+.pill.good{color:var(--good);border-color:var(--good)}
+.keybox{font:500 18px/1.6 var(--mono);letter-spacing:.04em;background:var(--bg);border:1px dashed var(--accent);border-radius:8px;padding:14px;overflow-wrap:anywhere;user-select:all}
+.check{flex-direction:row;align-items:flex-start;gap:8px;font-weight:400}
+.check input{width:auto;margin-top:4px}
+ul.entries{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:8px}
+.entry{background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:12px 14px;display:flex;flex-direction:column;gap:8px}
+.entry-top{display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:baseline}
+.entry-name{font-weight:600;overflow-wrap:anywhere}
+.entry-user{color:var(--muted);font-size:14px;overflow-wrap:anywhere}
+.entry-pass{font-family:var(--mono);font-size:14px;overflow-wrap:anywhere}
+.entry-notes{font-size:14px;color:var(--muted);white-space:pre-wrap;overflow-wrap:anywhere}
+.empty{color:var(--muted);text-align:center;padding:24px 8px;border:1px dashed var(--line);border-radius:8px}
+details summary{cursor:pointer;font-weight:600}
+details .stack{display:flex;flex-direction:column;gap:18px;margin-top:14px}
+.stack-sm{display:flex;flex-direction:column;gap:10px}
+#v-vault{display:flex;flex-direction:column;gap:16px}
+hr{border:none;border-top:1px solid var(--line);margin:0;width:100%}
+#toast{position:fixed;left:50%;bottom:20px;transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:8px 14px;border-radius:6px;font-size:14px;max-width:calc(100% - 32px)}
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Password Vault</h1>
+    <div class="row">
+      <span class="pill" id="storePill">Not connected</span>
+      <button id="lockBtn" type="button" hidden>Lock</button>
+    </div>
+  </header>
+
+  <!-- Connect this device -->
+  <section class="panel" id="v-connect">
+    <h2>Connect this device to GitHub</h2>
+    <p>Your encrypted vault is kept in a private GitHub repository. Enter where it is and an access token for it. You do this once on each device.</p>
+    <form id="connectForm" autocomplete="off">
+      <label for="cOwner">GitHub username
+        <input type="text" id="cOwner" required autocomplete="off" spellcheck="false" autocapitalize="off">
+      </label>
+      <label for="cRepo">Private repository that holds the vault
+        <input type="text" id="cRepo" required value="vault-data" autocomplete="off" spellcheck="false" autocapitalize="off">
+      </label>
+      <label for="cToken">Access token
+        <input class="secret" type="password" id="cToken" required autocomplete="off" spellcheck="false" placeholder="github_pat_…">
+      </label>
+      <p class="muted">Use a fine-grained token limited to that one repository, with Contents set to Read and write. The token is kept in this browser and sent only to GitHub.</p>
+      <div class="err" id="connectErr" role="alert"></div>
+      <div class="row"><button class="primary" type="submit" id="connectBtn">Connect</button></div>
+    </form>
+  </section>
+
+  <!-- Loading -->
+  <section class="panel" id="v-loading" hidden>
+    <h2>Opening your vault</h2>
+    <p class="muted">Fetching the encrypted vault from GitHub.</p>
+  </section>
+
+  <!-- Load failed -->
+  <section class="panel" id="v-loadfail" hidden>
+    <h2>The vault could not be opened</h2>
+    <p id="loadfailMsg"></p>
+    <p class="muted">Nothing has been changed or lost.</p>
+    <div class="row">
+      <button class="primary" type="button" id="retryBtn">Try again</button>
+      <button type="button" id="reconnectBtn">Change connection details</button>
+    </div>
+  </section>
+
+  <!-- Setup -->
+  <section class="panel" id="v-setup" hidden>
+    <h2>Create your vault</h2>
+    <p>Choose one master password. It encrypts everything in this vault, and it never leaves this device. Next you will get a recovery key, which resets the master password if you forget it.</p>
+    <form id="setupForm" autocomplete="off">
+      <label for="setupPw">Master password (12 characters or more)
+        <input class="secret" type="password" id="setupPw" minlength="12" required autocomplete="new-password">
+      </label>
+      <label for="setupPw2">Type it again
+        <input class="secret" type="password" id="setupPw2" required autocomplete="new-password">
+      </label>
+      <p class="muted">Four or five unrelated words make a strong password that is easy to remember.</p>
+      <div class="err" id="setupErr" role="alert"></div>
+      <div class="row"><button class="primary" type="submit" id="setupBtn">Create vault</button></div>
+    </form>
+    <hr>
+    <div class="stack-sm">
+      <h3>Already have a backup file?</h3>
+      <div class="row"><input type="file" id="restoreFileSetup" accept=".json,application/json"></div>
+      <div class="err" id="restoreSetupErr" role="alert"></div>
+    </div>
+  </section>
+
+  <!-- Recovery key display -->
+  <section class="panel" id="v-key" hidden>
+    <h2>Save your recovery key</h2>
+    <p>This key is the only way to reset your master password. Write it down or print it, and keep it somewhere outside this vault. It will not be shown again.</p>
+    <div class="keybox" id="keyText" aria-label="Recovery key"></div>
+    <div class="row"><button type="button" id="copyKeyBtn">Copy key</button></div>
+    <p class="note">If you lose both your master password and this key, nobody can open the vault.</p>
+    <label class="check" for="keySaved"><input type="checkbox" id="keySaved"> I have saved this key somewhere safe.</label>
+    <div class="row"><button class="primary" type="button" id="keyDoneBtn" disabled>Open my vault</button></div>
+  </section>
+
+  <!-- Locked -->
+  <section class="panel" id="v-locked" hidden>
+    <h2>Unlock</h2>
+    <form id="unlockForm" autocomplete="off">
+      <label for="unlockPw">Master password
+        <input class="secret" type="password" id="unlockPw" required autocomplete="current-password">
+      </label>
+      <div class="err" id="unlockErr" role="alert"></div>
+      <div class="row"><button class="primary" type="submit" id="unlockBtn">Unlock</button></div>
+    </form>
+    <button class="link" type="button" id="forgotBtn">Forgot your master password?</button>
+  </section>
+
+  <!-- Recover -->
+  <section class="panel" id="v-recover" hidden>
+    <h2>Reset your master password</h2>
+    <p>Enter the recovery key you saved when you created the vault, then choose a new master password. Your saved logins stay intact.</p>
+    <form id="recoverForm" autocomplete="off">
+      <label for="recKey">Recovery key
+        <input class="secret" type="text" id="recKey" required autocomplete="off" spellcheck="false" placeholder="XXXX-XXXX-XXXX-XXXX-XXXX-XXXX-XXXX-XXXX">
+      </label>
+      <label for="recPw">New master password (12 characters or more)
+        <input class="secret" type="password" id="recPw" minlength="12" required autocomplete="new-password">
+      </label>
+      <label for="recPw2">Type it again
+        <input class="secret" type="password" id="recPw2" required autocomplete="new-password">
+      </label>
+      <div class="err" id="recErr" role="alert"></div>
+      <div class="row">
+        <button class="primary" type="submit" id="recBtn">Reset password</button>
+        <button type="button" id="recCancelBtn">Back</button>
+      </div>
+    </form>
+    <p class="muted">After a reset you get a new recovery key. The old one stops working.</p>
+  </section>
+
+  <!-- Vault -->
+  <section id="v-vault" hidden>
+    <div class="row">
+      <input class="grow" type="search" id="search" placeholder="Search logins" aria-label="Search logins">
+      <button class="primary" type="button" id="addBtn">Add login</button>
+    </div>
+
+    <div class="panel" id="editor" hidden>
+      <h2 id="editorTitle">Add login</h2>
+      <form id="entryForm" autocomplete="off">
+        <label for="eName">Site or app
+          <input type="text" id="eName" required maxlength="120" autocomplete="off">
+        </label>
+        <label for="eUser">Username or email
+          <input type="text" id="eUser" maxlength="200" autocomplete="off">
+        </label>
+        <label for="ePass">Password
+          <span class="row">
+            <input class="secret grow" type="text" id="ePass" required maxlength="500" autocomplete="off" spellcheck="false">
+            <button type="button" id="genBtn">Generate</button>
+          </span>
+        </label>
+        <label for="eNotes">Notes
+          <textarea id="eNotes" maxlength="2000"></textarea>
+        </label>
+        <div class="err" id="entryErr" role="alert"></div>
+        <div class="row">
+          <button class="primary" type="submit" id="saveEntryBtn">Save</button>
+          <button type="button" id="cancelEntryBtn">Cancel</button>
+          <button class="danger" type="button" id="deleteEntryBtn" hidden>Delete</button>
+        </div>
+      </form>
+    </div>
+
+    <ul class="entries" id="list"></ul>
+    <div class="empty" id="emptyMsg" hidden></div>
+
+    <details class="panel" id="settings">
+      <summary>Settings and backup</summary>
+      <div class="stack">
+        <div class="stack-sm">
+          <h3>Change master password</h3>
+          <form id="changeForm" autocomplete="off">
+            <label for="chOld">Current master password
+              <input class="secret" type="password" id="chOld" required autocomplete="current-password">
+            </label>
+            <label for="chNew">New master password (12 characters or more)
+              <input class="secret" type="password" id="chNew" minlength="12" required autocomplete="new-password">
+            </label>
+            <label for="chNew2">Type it again
+              <input class="secret" type="password" id="chNew2" required autocomplete="new-password">
+            </label>
+            <div class="err" id="chErr" role="alert"></div>
+            <div class="row"><button type="submit" id="chBtn">Change password</button></div>
+          </form>
+        </div>
+        <hr>
+        <div class="stack-sm">
+          <h3>Recovery key</h3>
+          <p class="muted">Lost your recovery key, or think someone saw it? Make a new one. The old key stops working.</p>
+          <div class="row"><button type="button" id="newKeyBtn">Make a new recovery key</button></div>
+        </div>
+        <hr>
+        <div class="stack-sm">
+          <h3>Backup</h3>
+          <p class="muted">The backup is encrypted. Opening it needs your master password or recovery key.</p>
+          <div class="row">
+            <button type="button" id="dlBackupBtn">Download backup file</button>
+            <button type="button" id="copyBackupBtn">Copy backup as text</button>
+          </div>
+        </div>
+        <hr>
+        <div class="stack-sm">
+          <h3>Restore from a backup file</h3>
+          <p class="muted">Restoring replaces everything in this vault with the backup.</p>
+          <div class="row"><input type="file" id="restoreFile" accept=".json,application/json"></div>
+          <div class="row"><button class="danger" type="button" id="restoreBtn" disabled>Replace vault with this backup</button></div>
+          <div class="err" id="restoreErr" role="alert"></div>
+        </div>
+        <hr>
+        <div class="stack-sm">
+          <h3>This device</h3>
+          <p class="muted">Disconnecting removes the GitHub access token from this browser. The vault itself stays on GitHub. Do this on a shared or borrowed computer when you finish.</p>
+          <div class="row"><button class="danger" type="button" id="disconnectBtn">Disconnect this device</button></div>
+        </div>
+        <hr>
+        <p class="muted">Encryption: AES-256-GCM. Master password stretched with PBKDF2-SHA-256, 600,000 rounds. The vault locks after 5 minutes without activity.</p>
+      </div>
+    </details>
+  </section>
+</main>
+<div id="toast" role="status" aria-live="polite" hidden></div>
+
+<script>
+"use strict";
+const $ = id => document.getElementById(id);
+const enc = new TextEncoder(), dec = new TextDecoder();
+const CONN_LS = "password-vault-github-connection";
+const FILE = "vault.json";
+const PW_ITER = 600000, RK_ITER = 100000, IDLE_MS = 5 * 60 * 1000;
+const VIEWS = ["connect","loading","loadfail","setup","key","locked","recover","vault"];
+
+let vaultDoc = null;      // encrypted record as stored on GitHub
+let remoteSha = null;     // GitHub's version marker for the stored file
+let conn = null;          // { owner, repo, token }
+let vk = null, rawVK = null, entries = [];
+let editingId = null, pendingRestore = null, afterKey = null;
+
+/* ---------- helpers ---------- */
+function show(view){
+  for (const v of VIEWS) $("v-" + v).hidden = v !== view;
+  $("lockBtn").hidden = view !== "vault";
+}
+let toastTimer;
+function toast(msg){
+  const t = $("toast"); t.textContent = msg; t.hidden = false;
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => { t.hidden = true; }, 4500);
+}
+function rand(n){ return crypto.getRandomValues(new Uint8Array(n)); }
+function b64(u8){ let s = ""; for (let i = 0; i < u8.length; i += 8192) s += String.fromCharCode.apply(null, u8.subarray(i, i + 8192)); return btoa(s); }
+function unb64(s){ const b = atob(s), u = new Uint8Array(b.length); for (let i = 0; i < b.length; i++) u[i] = b.charCodeAt(i); return u; }
+async function busy(btn, label, fn){
+  const old = btn.textContent; btn.disabled = true; btn.textContent = label;
+  try { return await fn(); } finally { btn.disabled = false; btn.textContent = old; }
+}
+async function copyText(text, okMsg){
+  try { await navigator.clipboard.writeText(text); toast(okMsg); }
+  catch { toast("Copying is blocked here. Select the text and copy it by hand."); }
+}
+
+/* ---------- crypto ---------- */
+async function kdf(secret, salt, iter){
+  const base = await crypto.subtle.importKey("raw", enc.encode(secret), "PBKDF2", false, ["deriveKey"]);
+  return crypto.subtle.deriveKey({ name: "PBKDF2", salt, iterations: iter, hash: "SHA-256" }, base,
+    { name: "AES-GCM", length: 256 }, false, ["encrypt", "decrypt"]);
+}
+async function seal(key, bytes){
+  const iv = rand(12);
+  const ct = new Uint8Array(await crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, bytes));
+  return { iv: b64(iv), ct: b64(ct) };
+}
+async function unseal(key, box){
+  return new Uint8Array(await crypto.subtle.decrypt({ name: "AES-GCM", iv: unb64(box.iv) }, key, unb64(box.ct)));
+}
+// A slot holds the vault key, wrapped by a key derived from one secret.
+async function makeSlot(secret, iter, raw){
+  const salt = rand(16);
+  const box = await seal(await kdf(secret, salt, iter), raw);
+  return { salt: b64(salt), iter, iv: box.iv, ct: box.ct };
+}
+async function openSlot(secret, slot){
+  return unseal(await kdf(secret, unb64(slot.salt), slot.iter), slot);
+}
+async function setVK(raw){
+  rawVK = raw;
+  vk = await crypto.subtle.importKey("raw", raw, "AES-GCM", false, ["encrypt", "decrypt"]);
+}
+const B32 = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+function newRecoveryKey(){
+  const bytes = rand(20); let bits = "", out = "";
+  for (const b of bytes) bits += b.toString(2).padStart(8, "0");
+  for (let i = 0; i < bits.length; i += 5) out += B32[parseInt(bits.slice(i, i + 5), 2)];
+  return out.match(/.{4}/g).join("-");
+}
+function normKey(s){
+  return s.toUpperCase().replace(/0/g, "O").replace(/1/g, "I").replace(/8/g, "B").replace(/[^A-Z2-7]/g, "");
+}
+function genPassword(len = 20){
+  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%^&*-_=+?";
+  const limit = 256 - (256 % chars.length); let out = "";
+  while (out.length < len){
+    for (const b of rand(len * 2)){ if (b < limit && out.length < len) out += chars[b % chars.length]; }
+  }
+  return out;
+}
+function validDoc(d){
+  const slot = s => s && typeof s.salt === "string" && typeof s.iv === "string" && typeof s.ct === "string" && Number.isFinite(s.iter);
+  return d && d.v === 1 && slot(d.pw) && slot(d.rk) && d.data && typeof d.data.iv === "string" && typeof d.data.ct === "string";
+}
+
+/* ---------- GitHub storage ---------- */
+// Errors carry .kind: "auth" (token refused), "missing" (repository not reachable),
+// "conflict" (changed elsewhere), "corrupt", or "net".
+function fail(kind){ const e = new Error(kind); e.kind = kind; return e; }
+async function gh(path, opts = {}){
+  let r;
+  try {
+    r = await fetch("https://api.github.com/repos/" + encodeURIComponent(conn.owner) + "/" + encodeURIComponent(conn.repo) + path, {
+      cache: "no-store", ...opts,
+      headers: { Accept: "application/vnd.github+json", Authorization: "Bearer " + conn.token, ...(opts.body ? { "Content-Type": "application/json" } : {}) }
+    });
+  } catch { throw fail("net"); }
+  if (r.status === 401 || r.status === 403) throw fail("auth");
+  return r;
+}
+async function checkRepo(){
+  const r = await gh("");
+  if (r.status === 404) throw fail("missing");
+  if (!r.ok) throw fail("net");
+  const j = await r.json();
+  if (j.permissions && j.permissions.push === false) throw fail("auth");
+  return j;
+}
+async function loadRemote(){
+  const r = await gh("/contents/" + FILE);
+  if (r.status === 404){ await checkRepo(); remoteSha = null; return null; }   // repository is reachable, file not created yet
+  if (!r.ok) throw fail("net");
+  const j = await r.json();
+  let d;
+  try { d = JSON.parse(atob(String(j.content || "").replace(/\s/g, ""))); } catch { throw fail("corrupt"); }
+  if (!validDoc(d)) throw fail("corrupt");
+  remoteSha = j.sha;
+  return d;
+}
+let writeChain = Promise.resolve();
+function writeDoc(){
+  const snapshot = JSON.stringify(vaultDoc);
+  const job = writeChain.then(async () => {
+    const body = { message: "Update vault", content: btoa(snapshot) };
+    if (remoteSha) body.sha = remoteSha;
+    const r = await gh("/contents/" + FILE, { method: "PUT", body: JSON.stringify(body) });
+    if (r.status === 409 || r.status === 422) throw fail("conflict");
+    if (r.status === 404) throw fail("missing");
+    if (!r.ok) throw fail("net");
+    const j = await r.json();
+    remoteSha = j.content && j.content.sha;
+  });
+  writeChain = job.catch(() => {});
+  return job;
+}
+function explain(e){
+  switch (e && e.kind){
+    case "auth": return "GitHub refused the access token. It may have expired or lack write access to the repository. Disconnect this device and connect again with a new token.";
+    case "missing": return "GitHub found no repository with that name that this token can reach. Check the username, the repository name, and that the token was given access to it.";
+    case "conflict": return "The vault was changed on another device. Lock, unlock, and make this change again.";
+    case "corrupt": return "The vault file on GitHub is not a vault this page can read. Restore it from a backup file, or from the file's history on GitHub.";
+    default: return "GitHub could not be reached. Check your connection and try again.";
+  }
+}
+async function persist(){
+  vaultDoc.data = await seal(vk, enc.encode(JSON.stringify(entries)));
+  vaultDoc.updated = new Date().toISOString();
+  try { await writeDoc(); }
+  catch (e) { toast(explain(e)); throw e; }
+}
+function readConn(){
+  try { const c = JSON.parse(localStorage.getItem(CONN_LS) || "null"); return c && c.owner && c.repo && c.token ? c : null; } catch { return null; }
+}
+function setPill(){
+  const pill = $("storePill");
+  pill.textContent = conn ? "Synced to GitHub: " + conn.owner + "/" + conn.repo : "Not connected";
+  pill.classList.toggle("good", !!conn);
+}
+function showConnect(){
+  if (conn){ $("cOwner").value = conn.owner; $("cRepo").value = conn.repo; }
+  $("cToken").value = ""; $("connectErr").textContent = "";
+  show("connect");
+}
+async function init(){
+  if (!conn) conn = readConn();
+  setPill();
+  if (!conn){ showConnect(); return; }
+  show("loading");
+  try { vaultDoc = await loadRemote(); }
+  catch (e) { $("loadfailMsg").textContent = explain(e); show("loadfail"); return; }
+  show(vaultDoc ? "locked" : "setup");
+  if (vaultDoc) $("unlockPw").focus();
+}
+$("connectForm").addEventListener("submit", async e => {
+  e.preventDefault(); $("connectErr").textContent = "";
+  const next = { owner: $("cOwner").value.trim(), repo: $("cRepo").value.trim(), token: $("cToken").value.trim() };
+  await busy($("connectBtn"), "Connecting…", async () => {
+    const prev = conn; conn = next;
+    try { await checkRepo(); }
+    catch (err) { conn = prev; $("connectErr").textContent = explain(err); return; }
+    try { localStorage.setItem(CONN_LS, JSON.stringify(conn)); }
+    catch { toast("This browser would not remember the connection. You will need to enter it again next time."); }
+    $("cToken").value = "";
+    await init();
+  });
+});
+$("retryBtn").addEventListener("click", init);
+$("reconnectBtn").addEventListener("click", showConnect);
+$("disconnectBtn").addEventListener("click", () => {
+  try { localStorage.removeItem(CONN_LS); } catch {}
+  lock(); conn = null; vaultDoc = null; remoteSha = null; setPill(); showConnect();
+  toast("This device is disconnected.");
+});
+
+/* ---------- lock / unlock ---------- */
+function lock(){
+  if (rawVK) rawVK.fill(0);
+  vk = null; rawVK = null; entries = []; editingId = null;
+  $("list").replaceChildren(); $("editor").hidden = true; $("entryForm").reset();
+  $("changeForm").reset(); $("search").value = "";
+  if (vaultDoc) show("locked");
+}
+let idleTimer;
+function bump(){
+  clearTimeout(idleTimer);
+  if (vk) idleTimer = setTimeout(() => { if (vk){ lock(); toast("Locked after 5 minutes without activity."); } }, IDLE_MS);
+}
+["pointerdown", "keydown"].forEach(ev => document.addEventListener(ev, bump, true));
+
+async function openEntries(){
+  entries = JSON.parse(dec.decode(await unseal(vk, vaultDoc.data)));
+  if (!Array.isArray(entries)) entries = [];
+}
+function enterVault(){ show("vault"); render(); bump(); }
+function showKey(key, next){
+  $("keyText").textContent = key; $("keySaved").checked = false; $("keyDoneBtn").disabled = true;
+  afterKey = next; show("key");
+}
+function checkNewPw(a, b){
+  if (a.length < 12) return "Use 12 characters or more.";
+  if (a !== b) return "The two passwords do not match.";
+  return "";
+}
+// Fetch the newest copy before unlocking, so changes from other devices are included.
+async function refresh(){
+  const d = await loadRemote();
+  if (!d) throw fail("corrupt");
+  vaultDoc = d;
+}
+
+/* ---------- setup ---------- */
+$("setupForm").addEventListener("submit", async e => {
+  e.preventDefault();
+  const pw = $("setupPw").value, err = checkNewPw(pw, $("setupPw2").value);
+  $("setupErr").textContent = err; if (err) return;
+  await busy($("setupBtn"), "Creating…", async () => {
+    try {
+      const raw = rand(32), key = newRecoveryKey();
+      await setVK(raw); entries = [];
+      vaultDoc = { v: 1, pw: await makeSlot(pw, PW_ITER, raw), rk: await makeSlot(normKey(key), RK_ITER, raw), data: null };
+      await persist();
+      $("setupForm").reset();
+      showKey(key, enterVault);
+    } catch (er) { vaultDoc = null; vk = null; rawVK = null; $("setupErr").textContent = "The vault was not created. " + explain(er); }
+  });
+});
+$("keySaved").addEventListener("change", e => { $("keyDoneBtn").disabled = !e.target.checked; });
+$("copyKeyBtn").addEventListener("click", () => copyText($("keyText").textContent, "Recovery key copied."));
+$("keyDoneBtn").addEventListener("click", () => { $("keyText").textContent = ""; const n = afterKey; afterKey = null; if (n) n(); });
+
+/* ---------- unlock ---------- */
+$("unlockForm").addEventListener("submit", async e => {
+  e.preventDefault(); $("unlockErr").textContent = "";
+  await busy($("unlockBtn"), "Unlocking…", async () => {
+    try { await refresh(); }
+    catch (er) { $("unlockErr").textContent = explain(er); return; }
+    try {
+      await setVK(await openSlot($("unlockPw").value, vaultDoc.pw));
+      await openEntries();
+      $("unlockForm").reset(); enterVault();
+    } catch { vk = null; rawVK = null; $("unlockErr").textContent = "That password did not open the vault. Check it and try again."; }
+  });
+});
+$("forgotBtn").addEventListener("click", () => { $("recoverForm").reset(); $("recErr").textContent = ""; show("recover"); $("recKey").focus(); });
+$("recCancelBtn").addEventListener("click", () => show("locked"));
+$("lockBtn").addEventListener("click", lock);
+
+/* ---------- recover ---------- */
+$("recoverForm").addEventListener("submit", async e => {
+  e.preventDefault();
+  const pw = $("recPw").value, err = checkNewPw(pw, $("recPw2").value);
+  $("recErr").textContent = err; if (err) return;
+  await busy($("recBtn"), "Resetting…", async () => {
+    try { await refresh(); }
+    catch (er) { $("recErr").textContent = explain(er); return; }
+    let raw;
+    try { raw = await openSlot(normKey($("recKey").value), vaultDoc.rk); }
+    catch { $("recErr").textContent = "That recovery key did not match this vault. Check each character and try again."; return; }
+    const before = JSON.stringify(vaultDoc);
+    try {
+      await setVK(raw); await openEntries();
+      const key = newRecoveryKey();
+      vaultDoc.pw = await makeSlot(pw, PW_ITER, raw);
+      vaultDoc.rk = await makeSlot(normKey(key), RK_ITER, raw);
+      await persist();
+      $("recoverForm").reset();
+      showKey(key, enterVault);
+    } catch { vaultDoc = JSON.parse(before); vk = null; rawVK = null; $("recErr").textContent = "The reset could not be saved. Your old recovery key still works. Try again."; }
+  });
+});
+
+/* ---------- entries ---------- */
+function render(){
+  const q = $("search").value.trim().toLowerCase();
+  const shown = entries
+    .filter(en => !q || (en.name + " " + en.user).toLowerCase().includes(q))
+    .sort((a, b) => a.name.localeCompare(b.name));
+  const list = $("list"); list.replaceChildren();
+  for (const en of shown){
+    const li = document.createElement("li"); li.className = "entry";
+    const top = document.createElement("div"); top.className = "entry-top";
+    const left = document.createElement("div");
+    const name = document.createElement("div"); name.className = "entry-name"; name.textContent = en.name;
+    const user = document.createElement("div"); user.className = "entry-user"; user.textContent = en.user || "No username";
+    left.append(name, user);
+    const pass = document.createElement("div"); pass.className = "entry-pass"; pass.textContent = "••••••••••••";
+    top.append(left, pass);
+    const row = document.createElement("div"); row.className = "row";
+    const mk = (label, fn) => { const b = document.createElement("button"); b.type = "button"; b.textContent = label; b.addEventListener("click", fn); return b; };
+    let visible = false;
+    const showBtn = mk("Show", () => { visible = !visible; pass.textContent = visible ? en.pass : "••••••••••••"; showBtn.textContent = visible ? "Hide" : "Show"; });
+    row.append(
+      mk("Copy password", () => copyText(en.pass, "Password copied.")),
+      showBtn,
+      mk("Edit", () => openEditor(en))
+    );
+    if (en.user) row.append(mk("Copy username", () => copyText(en.user, "Username copied.")));
+    li.append(top, row);
+    if (en.notes){ const n = document.createElement("div"); n.className = "entry-notes"; n.textContent = en.notes; li.append(n); }
+    list.append(li);
+  }
+  const empty = $("emptyMsg");
+  empty.hidden = shown.length > 0;
+  empty.textContent = entries.length ? "No logins match that search." : "No logins yet. Choose Add login to save your first one.";
+}
+function openEditor(en){
+  editingId = en ? en.id : null;
+  $("editorTitle").textContent = en ? "Edit login" : "Add login";
+  $("eName").value = en ? en.name : ""; $("eUser").value = en ? en.user : "";
+  $("ePass").value = en ? en.pass : ""; $("eNotes").value = en ? en.notes : "";
+  $("entryErr").textContent = "";
+  const del = $("deleteEntryBtn"); del.hidden = !en; del.textContent = "Delete"; del.dataset.armed = "";
+  $("editor").hidden = false; $("eName").focus();
+  $("editor").scrollIntoView({ block: "nearest" });
+}
+function closeEditor(){ $("editor").hidden = true; $("entryForm").reset(); editingId = null; }
+$("addBtn").addEventListener("click", () => openEditor(null));
+$("cancelEntryBtn").addEventListener("click", closeEditor);
+$("genBtn").addEventListener("click", () => { $("ePass").value = genPassword(); });
+$("search").addEventListener("input", render);
+$("entryForm").addEventListener("submit", async e => {
+  e.preventDefault();
+  const before = JSON.stringify(entries);
+  const rec = { name: $("eName").value.trim(), user: $("eUser").value.trim(), pass: $("ePass").value, notes: $("eNotes").value.trim(), updated: Date.now() };
+  if (!rec.name || !rec.pass){ $("entryErr").textContent = "Enter a site name and a password."; return; }
+  await busy($("saveEntryBtn"), "Saving…", async () => {
+    if (editingId){ const i = entries.findIndex(x => x.id === editingId); if (i >= 0) entries[i] = { ...entries[i], ...rec }; }
+    else entries.push({ id: b64(rand(9)), ...rec });
+    try { await persist(); closeEditor(); render(); toast("Saved."); }
+    catch (er) { entries = JSON.parse(before); $("entryErr").textContent = "Not saved. " + explain(er); }
+  });
+});
+$("deleteEntryBtn").addEventListener("click", async () => {
+  const btn = $("deleteEntryBtn");
+  if (!btn.dataset.armed){ btn.dataset.armed = "1"; btn.textContent = "Click again to delete for good"; return; }
+  const before = JSON.stringify(entries);
+  entries = entries.filter(x => x.id !== editingId);
+  try { await persist(); closeEditor(); render(); toast("Deleted."); }
+  catch (er) { entries = JSON.parse(before); $("entryErr").textContent = "Not deleted. " + explain(er); }
+});
+
+/* ---------- settings ---------- */
+$("changeForm").addEventListener("submit", async e => {
+  e.preventDefault();
+  const pw = $("chNew").value, err = checkNewPw(pw, $("chNew2").value);
+  $("chErr").textContent = err; if (err) return;
+  await busy($("chBtn"), "Changing…", async () => {
+    try { await openSlot($("chOld").value, vaultDoc.pw); }
+    catch { $("chErr").textContent = "The current password is not right."; return; }
+    const before = vaultDoc.pw;
+    try { vaultDoc.pw = await makeSlot(pw, PW_ITER, rawVK); await persist(); $("changeForm").reset(); toast("Master password changed."); }
+    catch (er) { vaultDoc.pw = before; $("chErr").textContent = "Not changed. " + explain(er); }
+  });
+});
+$("newKeyBtn").addEventListener("click", async () => {
+  await busy($("newKeyBtn"), "Working…", async () => {
+    const before = vaultDoc.rk, key = newRecoveryKey();
+    try { vaultDoc.rk = await makeSlot(normKey(key), RK_ITER, rawVK); await persist(); showKey(key, enterVault); }
+    catch { vaultDoc.rk = before; }
+  });
+});
+function backupText(){ return JSON.stringify(vaultDoc, null, 1); }
+$("copyBackupBtn").addEventListener("click", () => copyText(backupText(), "Encrypted backup copied. Paste it into a file and keep it safe."));
+$("dlBackupBtn").addEventListener("click", () => {
+  const url = URL.createObjectURL(new Blob([backupText()], { type: "application/json" }));
+  const a = document.createElement("a");
+  a.href = url; a.download = "password-vault-backup-" + new Date().toISOString().slice(0, 10) + ".json";
+  document.body.append(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 10000);
+});
+async function readBackup(file){
+  const d = JSON.parse(await file.text());
+  if (!validDoc(d)) throw fail("corrupt");
+  return d;
+}
+async function applyRestore(d){
+  const before = vaultDoc;
+  vaultDoc = d;
+  try { await writeDoc(); } catch (e) { vaultDoc = before; throw e; }
+  if (rawVK) rawVK.fill(0);
+  vk = null; rawVK = null; entries = [];
+  $("list").replaceChildren(); closeEditor();
+  show("locked"); toast("Backup restored. Unlock it with that backup's master password.");
+}
+$("restoreFileSetup").addEventListener("change", async e => {
+  const f = e.target.files[0]; if (!f) return; $("restoreSetupErr").textContent = "";
+  let d;
+  try { d = await readBackup(f); }
+  catch { $("restoreSetupErr").textContent = "That file is not a backup from this vault."; e.target.value = ""; return; }
+  try { await applyRestore(d); }
+  catch (er) { $("restoreSetupErr").textContent = "The backup was not restored. " + explain(er); }
+  e.target.value = "";
+});
+$("restoreFile").addEventListener("change", async e => {
+  const f = e.target.files[0]; pendingRestore = null; $("restoreBtn").disabled = true; $("restoreErr").textContent = "";
+  if (!f) return;
+  try { pendingRestore = await readBackup(f); $("restoreBtn").disabled = false; }
+  catch { $("restoreErr").textContent = "That file is not a backup from this vault."; }
+});
+$("restoreBtn").addEventListener("click", async () => {
+  if (!pendingRestore) return;
+  try { await applyRestore(pendingRestore); pendingRestore = null; $("restoreFile").value = ""; $("restoreBtn").disabled = true; }
+  catch (er) { $("restoreErr").textContent = "Your current vault is unchanged. " + explain(er); }
+});
+
+if (!(window.crypto && crypto.subtle)){
+  $("connectForm").hidden = true;
+  $("v-connect").querySelector("p").textContent = "This browser cannot run the encryption the vault needs. Open the page over https in a current browser.";
+} else init();
+</script>
+</body>
+</html>
